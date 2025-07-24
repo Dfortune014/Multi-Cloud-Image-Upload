@@ -6,6 +6,10 @@ A modern, responsive web application for uploading and managing images across mu
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-blue?style=for-the-badge&logo=typescript)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4.17-38B2AC?style=for-the-badge&logo=tailwind-css)
 
+## 📍 Repository
+
+🔗 **GitHub Repository**: [https://github.com/Dfortune014/Multi-Cloud-Image-Upload](https://github.com/Dfortune014/Multi-Cloud-Image-Upload)
+
 ## ✨ Features
 
 - **🔄 Multi-Cloud Support**: Upload to AWS S3, Azure Blob Storage, or GCP Cloud Storage
@@ -28,7 +32,7 @@ A modern, responsive web application for uploading and managing images across mu
 
 1. **Clone the repository**
    ```bash
-   git clone <your-repo-url>
+   git clone https://github.com/Dfortune014/Multi-Cloud-Image-Upload.git
    cd Multi-Cloud-Image-Upload
    ```
 
@@ -280,3 +284,5 @@ If you encounter any issues:
 ---
 
 **Happy uploading! 🚀**
+git config --global user.name "Fortune Linus"
+git config --global user.email "linusfortune54@gmail.com"
