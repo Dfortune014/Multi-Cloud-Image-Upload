@@ -31,59 +31,106 @@ import {
 } from 'lucide-react'
 
 export default function FilesPage() {
-  const [files, setFiles] = useState<StoredFile[]>([])
-  const [totalFiles, setTotalFiles] = useState(0)
-  const [totalPages, setTotalPages] = useState(0)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [loading, setLoading] = useState(true)
-  const [deletingFile, setDeletingFile] = useState<string | null>(null)
+  const [files, setFiles] = useState<any[]>([]); // S3 file objects
+  const [totalFiles, setTotalFiles] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [deletingFile, setDeletingFile] = useState<string | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<'aws-s3' | 'azure-blob' | 'gcp-storage'>('aws-s3');
 
-  const filesPerPage = 20
+  const filesPerPage = 20;
 
   useEffect(() => {
-    loadFiles(currentPage)
-  }, [currentPage])
+    loadFiles();
+  }, [selectedProvider]);
 
-  const loadFiles = (page: number) => {
-    setLoading(true)
+  // Fetch files from S3, Azure, or GCP API
+  const loadFiles = async () => {
+    setLoading(true);
     try {
-      const result = FileStorage.getFilesPaginated(page, filesPerPage)
-      setFiles(result.files)
-      setTotalFiles(result.totalFiles)
-      setTotalPages(result.totalPages)
-      setCurrentPage(result.currentPage)
-    } catch (error) {
-      console.error('Error loading files:', error)
-      toast.error('Failed to load files')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleDeleteFile = async (fileId: string, fileName: string) => {
-    setDeletingFile(fileId)
-
-    try {
-      const success = FileStorage.deleteFile(fileId)
-      if (success) {
-        toast.success(`"${fileName}" deleted successfully`)
-        // Reload current page, or go to previous page if current page is empty
-        const newResult = FileStorage.getFilesPaginated(currentPage, filesPerPage)
-        if (newResult.files.length === 0 && currentPage > 1) {
-          setCurrentPage(currentPage - 1)
-        } else {
-          loadFiles(currentPage)
-        }
+      const apiEndpoint = selectedProvider === 'azure-blob' ? '/api/azure' : 
+                         selectedProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
+      const res = await fetch(apiEndpoint);
+      const data = await res.json();
+      if (res.ok && data.files) {
+        setFiles(data.files);
+        setTotalFiles(data.files.length);
+        setTotalPages(Math.ceil(data.files.length / filesPerPage));
+        setCurrentPage(1);
       } else {
-        toast.error('Failed to delete file')
+        setFiles([]);
+        setTotalFiles(0);
+        setTotalPages(0);
+        setCurrentPage(1);
       }
     } catch (error) {
-      console.error('Error deleting file:', error)
-      toast.error('Error deleting file')
+      setFiles([]);
+      setTotalFiles(0);
+      setTotalPages(0);
+      setCurrentPage(1);
     } finally {
-      setDeletingFile(null)
+      setLoading(false);
     }
-  }
+  };
+
+  // Paginate files in-memory
+  const paginatedFiles = files.slice((currentPage - 1) * filesPerPage, currentPage * filesPerPage);
+
+  // Replace the old delete logic
+  const handleDeleteFile = async (fileName: string) => {
+    setDeletingFile(fileName);
+    try {
+      const apiEndpoint = selectedProvider === 'azure-blob' ? '/api/azure' : 
+                         selectedProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
+      const res = await fetch(`${apiEndpoint}?key=${encodeURIComponent(fileName)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`"${fileName}" deleted successfully`);
+        loadFiles(); // Refresh the list after deletion
+      } else {
+        toast.error(data.error || 'Failed to delete file');
+      }
+    } catch (error) {
+      toast.error('Error deleting file');
+    } finally {
+      setDeletingFile(null);
+    }
+  };
+
+  // Add a new view/download handler
+  const handleViewFile = async (fileName: string) => {
+    try {
+      const apiEndpoint = selectedProvider === 'azure-blob' ? '/api/azure' : 
+                         selectedProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
+      const res = await fetch(`${apiEndpoint}?key=${encodeURIComponent(fileName)}`);
+      if (!res.ok) {
+        toast.error('Failed to fetch file');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (error) {
+      toast.error('Error fetching file');
+    }
+  };
+
+  // Add helper functions for image preview
+  const getPreviewUrl = (fileName: string) => {
+    const apiEndpoint = selectedProvider === 'azure-blob' ? '/api/azure' : 
+                       selectedProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
+    return `${apiEndpoint}?key=${encodeURIComponent(fileName)}`;
+  };
+
+  const isImageFile = (fileName: string) => {
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
+    const extension = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
+    return imageExtensions.includes(extension);
+  };
 
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) {
@@ -178,9 +225,45 @@ export default function FilesPage() {
           <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-4">
             Your Files
           </h1>
-          <p className="text-lg text-slate-600 dark:text-slate-400">
+          <p className="text-lg text-slate-600 dark:text-slate-400 mb-6">
             Manage your uploaded images across all cloud providers
           </p>
+          
+          {/* Provider Selector */}
+          <div className="flex justify-center mb-6">
+            <div className="flex items-center space-x-4 p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm">
+              <button
+                onClick={() => setSelectedProvider('aws-s3')}
+                className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                  selectedProvider === 'aws-s3'
+                    ? 'bg-blue-500 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                AWS S3
+              </button>
+              <button
+                onClick={() => setSelectedProvider('azure-blob')}
+                className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                  selectedProvider === 'azure-blob'
+                    ? 'bg-blue-500 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                Azure Blob
+              </button>
+              <button
+                onClick={() => setSelectedProvider('gcp-storage')}
+                className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                  selectedProvider === 'gcp-storage'
+                    ? 'bg-blue-500 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                GCP Storage
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Stats */}
@@ -227,32 +310,36 @@ export default function FilesPage() {
           ) : (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
-                {files.map((file) => (
-                  <Card key={file.id} className="shadow-lg overflow-hidden group">
+                {paginatedFiles.map((file) => (
+                  <Card key={file.name} className="shadow-lg overflow-hidden group">
                     <CardContent className="p-0">
                       {/* Image Preview */}
                       <div className="aspect-square bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
-                        {file.thumbnailUrl ? (
+                        {isImageFile(file.name) ? (
                           <img
-                            src={file.thumbnailUrl}
+                            src={getPreviewUrl(file.name)}
                             alt={file.name}
                             className="w-full h-full object-cover"
+                            onError={(e) => {
+                              // Fallback to icon if image fails to load
+                              e.currentTarget.style.display = 'none';
+                              e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                            }}
                           />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <ImageIcon className="h-12 w-12 text-slate-400" />
-                          </div>
-                        )}
+                        ) : null}
+                        <div className={`w-full h-full flex items-center justify-center ${isImageFile(file.name) ? 'hidden' : ''}`}>
+                          <ImageIcon className="h-12 w-12 text-slate-400" />
+                        </div>
 
                         {/* Delete button overlay */}
                         <Button
                           variant="destructive"
                           size="icon"
                           className="absolute top-2 right-2 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => handleDeleteFile(file.id, file.name)}
-                          disabled={deletingFile === file.id}
+                          onClick={() => handleDeleteFile(file.name)}
+                          disabled={deletingFile === file.name}
                         >
-                          {deletingFile === file.id ? (
+                          {deletingFile === file.name ? (
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                           ) : (
                             <Trash2 className="h-4 w-4" />
@@ -273,7 +360,8 @@ export default function FilesPage() {
 
                         <div className="flex items-center justify-between">
                           <Badge variant="secondary">
-                            {FileStorage.getProviderName(file.provider)}
+                            {selectedProvider === 'aws-s3' ? 'AWS S3' : 
+                             selectedProvider === 'azure-blob' ? 'Azure Blob' : 'GCP Storage'}
                           </Badge>
 
                           <div className="flex items-center space-x-1">
@@ -281,7 +369,7 @@ export default function FilesPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => window.open(file.url, '_blank')}
+                              onClick={() => handleViewFile(file.name)}
                               title="View full size"
                             >
                               <Eye className="h-4 w-4" />
@@ -290,11 +378,11 @@ export default function FilesPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => handleDeleteFile(file.id, file.name)}
-                              disabled={deletingFile === file.id}
+                              onClick={() => handleDeleteFile(file.name)}
+                              disabled={deletingFile === file.name}
                               title="Delete file"
                             >
-                              {deletingFile === file.id ? (
+                              {deletingFile === file.name ? (
                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-slate-900" />
                               ) : (
                                 <Trash2 className="h-4 w-4" />
@@ -305,7 +393,7 @@ export default function FilesPage() {
 
                         <div className="flex items-center text-xs text-slate-500">
                           <Calendar className="h-3 w-3 mr-1" />
-                          {FileStorage.formatDate(file.uploadDate)}
+                          {file.lastModified ? new Date(file.lastModified).toLocaleDateString() : 'Unknown date'}
                         </div>
                       </div>
                     </CardContent>

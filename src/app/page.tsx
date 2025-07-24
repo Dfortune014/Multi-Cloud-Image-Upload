@@ -80,52 +80,57 @@ export default function ImageUploader() {
     setUploadResponse(null)
 
     try {
-      // Simulate upload delay
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('provider', cloudProvider);
 
-      // Simulate random success/failure for demo
-      const success = Math.random() > 0.2
+      // Choose API endpoint based on provider
+      const apiEndpoint = cloudProvider === 'azure-blob' ? '/api/azure' : 
+                         cloudProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
 
-      if (success) {
-        // Save file to storage
-        const savedFile = FileStorage.saveFile(selectedFile, cloudProvider)
+      const res = await fetch(apiEndpoint, {
+        method: 'POST',
+        body: formData,
+      });
 
+      const data = await res.json();
+      if (res.ok) {
         const response: UploadResponse = {
           success: true,
-          message: `Image uploaded to ${getProviderName(cloudProvider)} successfully!`,
+          message: data.message || `Image uploaded to ${getProviderName(cloudProvider)} successfully!`,
           provider: cloudProvider,
-          file: savedFile
-        }
-        setUploadResponse(response)
-        toast.success(response.message)
+          // file: data.file // 
+        };
+        setUploadResponse(response);
+        toast.success(response.message);
 
         // Clear the selected file after successful upload
         setTimeout(() => {
-          setSelectedFile(null)
-          setUploadResponse(null)
+          setSelectedFile(null);
+          setUploadResponse(null);
           if (fileInputRef.current) {
-            fileInputRef.current.value = ''
+            fileInputRef.current.value = '';
           }
-        }, 3000)
+        }, 3000);
       } else {
         const response: UploadResponse = {
           success: false,
-          message: `Failed to upload to ${getProviderName(cloudProvider)}. Please try again.`,
-          provider: cloudProvider
-        }
-        setUploadResponse(response)
-        toast.error(response.message)
+          message: data.error || `Failed to upload to ${getProviderName(cloudProvider)}. Please try again.`,
+          provider: cloudProvider,
+        };
+        setUploadResponse(response);
+        toast.error(response.message);
       }
     } catch (error) {
       const response: UploadResponse = {
         success: false,
         message: 'Upload failed due to network error',
-        provider: cloudProvider
-      }
-      setUploadResponse(response)
-      toast.error(response.message)
+        provider: cloudProvider,
+      };
+      setUploadResponse(response);
+      toast.error(response.message);
     } finally {
-      setIsUploading(false)
+      setIsUploading(false);
     }
   }
 
