@@ -1,126 +1,143 @@
-# 🚀 Google Cloud Platform (GCP) Implementation Guide
+# 🚀 Azure Blob Storage Implementation Guide
 
-Complete step-by-step guide to implement Google Cloud Storage integration in the Multi-Cloud Image Upload project.
+Complete step-by-step guide to implement Azure Blob Storage integration with **presigned URLs (SAS)** for enhanced security in the Multi-Cloud Image Upload project.
 
 ## 📋 Table of Contents
 
 1. [Prerequisites](#prerequisites)
-2. [GCP Console Setup](#gcp-console-setup)
-3. [Service Account Configuration](#service-account-configuration)
-4. [Cloud Storage Setup](#cloud-storage-setup)
-5. [Project Implementation](#project-implementation)
-6. [Code Implementation](#code-implementation)
-7. [Testing](#testing)
-8. [Troubleshooting](#troubleshooting)
-9. [Security Best Practices](#security-best-practices)
+2. [Azure Portal Setup](#azure-portal-setup)
+3. [Storage Account Configuration](#storage-account-configuration)
+4. [Container Setup](#container-setup)
+5. [CORS Configuration](#cors-configuration)
+6. [Project Implementation](#project-implementation)
+7. [Presigned URL Implementation](#presigned-url-implementation)
+8. [Frontend Integration](#frontend-integration)
+9. [Testing](#testing)
+10. [Troubleshooting](#troubleshooting)
+11. [Security Best Practices](#security-best-practices)
 
 ## 🔧 Prerequisites
 
-- Google Cloud Platform account with billing enabled
+- Azure account with active subscription
 - Node.js 18+ or Bun
-- Basic knowledge of GCP services
+- Basic knowledge of Azure services
 - Next.js project setup
 
-## ☁️ GCP Console Setup
+## ☁️ Azure Portal Setup
 
-### Step 1: Create GCP Project
+### Step 1: Create Storage Account
 
-1. **Sign in to Google Cloud Console**
+1. **Sign in to Azure Portal**
    ```bash
-   # Navigate to GCP Console
-   https://console.cloud.google.com/
+   # Navigate to Azure Portal
+   https://portal.azure.com/
    ```
 
-2. **Create New Project**
-   - Click on the project dropdown at the top
-   - Click "New Project"
-   - Enter project name: `cloud-uploader-project`
+2. **Create Storage Account**
+   - Search for "Storage accounts" in the search bar
+   - Click "Create" → "Storage account"
+
+3. **Configure Storage Account**
+   - **Subscription**: Select your subscription
+   - **Resource group**: Create new or use existing
+   - **Storage account name**: `multiclouduploader` (must be globally unique)
+   - **Region**: Choose your preferred region
+   - **Performance**: Standard
+   - **Redundancy**: Locally-redundant storage (LRS)
+
+4. **Advanced Settings**
+   - **Enable hierarchical namespace**: No
+   - **Blob public access**: Disabled (for security)
+   - **Minimum TLS version**: Version 1.2
+
+5. **Create Account**
+   - Click "Review + create" → "Create"
+
+### Step 2: Create Container
+
+1. **Navigate to Storage Account**
+   - Go to your storage account
+   - Click "Containers" in the left menu
+
+2. **Create Container**
+   - Click "+ Container"
+   - **Name**: `images`
+   - **Public access level**: Private (no anonymous access)
    - Click "Create"
 
-3. **Enable Billing**
-   - Go to Billing in the left menu
-   - Link a billing account to your project
-   - **Important**: Cloud Storage requires billing to be enabled
+## 🛡️ CORS Configuration
 
-### Step 2: Enable Cloud Storage API
+### Step 1: Configure CORS (Critical for Presigned URLs)
 
-1. **Navigate to APIs & Services**
-   - Go to "APIs & Services" → "Library"
-   - Search for "Cloud Storage"
-   - Click on "Cloud Storage API"
-   - Click "Enable"
+**This is essential for presigned URL functionality!**
 
-### Step 3: Create Cloud Storage Bucket
+1. **Navigate to CORS Settings**
+   - In your storage account → **Settings** → **Resource sharing (CORS)**
+   - Click "Add"
 
-1. **Navigate to Cloud Storage**
-   - Go to "Cloud Storage" → "Buckets"
-   - Click "Create Bucket"
-
-2. **Configure Bucket**
-   ```bash
-   Name: cloud-uploader-bucket
-   Location type: Region
-   Location: us-central1 (or your preferred region)
-   Storage class: Standard
-   Access control: Uniform
-   Protection tools: None (for development)
+2. **Add CORS Rule**
+   ```json
+   {
+     "AllowedOrigins": [
+       "http://localhost:3000",
+       "https://localhost:3000",
+       "http://localhost:3001",
+       "https://localhost:3001",
+       "http://127.0.0.1:3000",
+       "https://127.0.0.1:3000",
+       "http://127.0.0.1:3001",
+       "https://127.0.0.1:3001"
+     ],
+     "AllowedMethods": ["GET", "POST", "PUT", "DELETE", "HEAD"],
+     "AllowedHeaders": ["*"],
+     "ExposedHeaders": ["*"],
+     "MaxAgeInSeconds": 3600
+   }
    ```
 
-3. **Create Bucket**
-   - Click "Create"
-   - Note your bucket name and region
+3. **Save Configuration**
+   - Click "Add" to save the CORS rule
 
-## 🔐 Service Account Configuration
+## 🔑 Access Keys Configuration
 
-### Step 1: Create Service Account
+### Step 1: Get Access Keys
 
-1. **Navigate to IAM & Admin**
-   - Go to "IAM & Admin" → "Service Accounts"
-   - Click "Create Service Account"
+1. **Navigate to Access Keys**
+   - In your storage account → **Access keys**
+   - Click "Show" next to **key1**
 
-2. **Configure Service Account**
-   ```bash
-   Service account name: cloud-uploader-service
-   Service account ID: cloud-uploader-service
-   Description: Service account for Cloud Uploader application
-   ```
+2. **Copy Credentials**
+   - **Storage account name**: Your storage account name
+   - **Key**: Copy the key value
+   - **Connection string**: Copy the connection string
 
-3. **Grant Access**
-   - Click "Grant this service account access to project"
-   - Add role: "Storage Object Admin"
-   - Click "Continue" → "Done"
+### Step 2: Create Shared Access Signature (Optional)
 
-### Step 2: Create and Download Key
+1. **Navigate to Shared Access Signature**
+   - In your storage account → **Shared access signature**
 
-1. **Create Key**
-   - Click on your service account
-   - Go to "Keys" tab
-   - Click "Add Key" → "Create new key"
-   - Choose "JSON" format
-   - Click "Create"
+2. **Configure SAS**
+   - **Allowed services**: Blob
+   - **Allowed resource types**: Container, Object
+   - **Allowed permissions**: Read, Write, Delete, List
+   - **Start time**: Now
+   - **Expiry time**: 1 year from now
+   - **Allowed protocols**: HTTPS only
 
-2. **Download Key File**
-   - The JSON file will download automatically
-   - Save it as `gcp-service-account.json` in your project
-   - **IMPORTANT**: Keep this file secure and never commit it to version control
-
-### Step 3: Service Account Permissions
-
-The service account should have these roles:
-- `Storage Object Admin` - Full access to objects
-- `Storage Object Viewer` - Read access to objects
-- `Storage Object Creator` - Create objects
+3. **Generate SAS**
+   - Click "Generate SAS and connection string"
+   - Copy the SAS token
 
 ## 📦 Project Implementation
 
 ### Step 1: Install Dependencies
 
 ```bash
-# Install Google Cloud Storage SDK
-npm install @google-cloud/storage
+# Install Azure Storage Blob SDK
+npm install @azure/storage-blob
 
 # Or with Bun
-bun add @google-cloud/storage
+bun add @azure/storage-blob
 ```
 
 ### Step 2: Environment Variables
@@ -128,379 +145,599 @@ bun add @google-cloud/storage
 Create `.env.local` file in your project root:
 
 ```env
-# GCP Configuration
-GCP_BUCKET_NAME=cloud-uploader-bucket
-GOOGLE_APPLICATION_CREDENTIALS=./gcp-service-account.json
+# Azure Blob Storage Configuration
+AZURE_STORAGE_ACCOUNT_NAME=your-storage-account-name
+AZURE_STORAGE_ACCOUNT_KEY=your-storage-account-key
+AZURE_STORAGE_CONNECTION_STRING=your-connection-string
+AZURE_STORAGE_CONTAINER_NAME=images
+AZURE_STORAGE_SAS_TOKEN=your-sas-token
 ```
 
-### Step 3: Create API Route
+## 🔐 Presigned URL Implementation
 
-Create file: `src/app/api/gcp/route.ts`
+### Step 1: Create Presigned Upload API
+
+Create file: `src/app/api/azure/azure-post/route.ts`
 
 ```typescript
-import { Storage } from '@google-cloud/storage';
 import { NextRequest, NextResponse } from 'next/server';
+import { BlobServiceClient, StorageSharedKeyCredential, generateBlobSASQueryParameters, BlobSASPermissions } from '@azure/storage-blob';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
 
 // Validate environment variables
-const validateGcpEnv = () => {
-  const bucketName = process.env.GCP_BUCKET_NAME;
-  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+const validateAzureEnv = () => {
+  const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+  const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
+  const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME;
   
-  if (!bucketName || !credentialsPath) {
-    throw new Error('Missing GCP environment variables. Please set GCP_BUCKET_NAME and GOOGLE_APPLICATION_CREDENTIALS');
+  if (!accountName || !accountKey || !containerName) {
+    throw new Error('Missing Azure environment variables');
   }
   
-  return { bucketName, credentialsPath };
+  return { accountName, accountKey, containerName };
 };
 
-// Initialize GCP Storage client
-let storage: Storage;
-let bucketName: string;
+// Initialize Azure Blob Service client
+let blobServiceClient: BlobServiceClient;
+let containerName: string;
 
 try {
-  const { bucketName: bucket, credentialsPath } = validateGcpEnv();
-  bucketName = bucket;
-  storage = new Storage({
-    keyFilename: credentialsPath,
-  });
+  const { accountName, accountKey, containerName: container } = validateAzureEnv();
+  containerName = container;
+  
+  const credential = new StorageSharedKeyCredential(accountName, accountKey);
+  blobServiceClient = new BlobServiceClient(
+    `https://${accountName}.blob.core.windows.net`,
+    credential
+  );
 } catch (error) {
-  console.error('GCP client initialization failed:', error);
+  console.error('Azure Blob Service client initialization failed:', error);
 }
 
-// POST: Upload file to GCP Cloud Storage
 export async function POST(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
   try {
-    if (!storage || !bucketName) {
-      return NextResponse.json({ 
-        error: 'GCP client not initialized. Please check environment variables.' 
+    if (!blobServiceClient || !containerName) {
+      const response = NextResponse.json({ 
+        error: 'Azure Blob Service client not initialized' 
       }, { status: 500 });
+      return addCorsHeaders(response, req);
     }
-    
-    const formData = await req.formData();
-    const file = formData.get('file') as File;
-    if (!file) {
-      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+
+    const body = await req.json();
+    const { fileName, fileType, fileSize } = body;
+
+    if (!fileName || !fileType) {
+      const response = NextResponse.json({ 
+        error: 'Missing required fields: fileName and fileType are required' 
+      }, { status: 400 });
+      return addCorsHeaders(response, req);
     }
+
+    // Generate unique filename
+    const timestamp = Date.now();
+    const uniqueFileName = `${timestamp}-${fileName}`;
+
+    // Get container client
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blobClient = containerClient.getBlobClient(uniqueFileName);
+
+    // Generate SAS URL for upload (write permission)
+    const sasToken = generateBlobSASQueryParameters(
+      {
+        containerName,
+        blobName: uniqueFileName,
+        permissions: BlobSASPermissions.parse("w"), // Write permission
+        startsOn: new Date(),
+        expiresOn: new Date(new Date().valueOf() + 60 * 60 * 1000), // 1 hour
+      },
+      blobServiceClient.credential as StorageSharedKeyCredential
+    ).toString();
+
+    const presignedUrl = `${blobClient.url}?${sasToken}`;
+
+    const response = NextResponse.json({
+      presignedUrl,
+      fileName: uniqueFileName,
+      expiresIn: 3600,
+      message: 'Presigned upload URL generated successfully'
+    });
     
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('Azure presigned upload URL generation failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to generate presigned upload URL', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+### Step 2: Create Presigned Download API
+
+Create file: `src/app/api/azure/azure-get/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { BlobServiceClient, StorageSharedKeyCredential, generateBlobSASQueryParameters, BlobSASPermissions } from '@azure/storage-blob';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
+
+// ... (same initialization code as above) ...
+
+export async function POST(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
+  try {
+    if (!blobServiceClient || !containerName) {
+      const response = NextResponse.json({ 
+        error: 'Azure Blob Service client not initialized' 
+      }, { status: 500 });
+      return addCorsHeaders(response, req);
+    }
+
+    const body = await req.json();
+    const { fileName } = body;
+
+    if (!fileName) {
+      const response = NextResponse.json({ 
+        error: 'Missing required field: fileName is required' 
+      }, { status: 400 });
+      return addCorsHeaders(response, req);
+    }
+
+    // Get container client
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blobClient = containerClient.getBlobClient(fileName);
+
+    // Generate SAS URL for download (read permission)
+    const sasToken = generateBlobSASQueryParameters(
+      {
+        containerName,
+        blobName: fileName,
+        permissions: BlobSASPermissions.parse("r"), // Read permission
+        startsOn: new Date(),
+        expiresOn: new Date(new Date().valueOf() + 15 * 60 * 1000), // 15 minutes
+      },
+      blobServiceClient.credential as StorageSharedKeyCredential
+    ).toString();
+
+    const presignedUrl = `${blobClient.url}?${sasToken}`;
+
+    const response = NextResponse.json({
+      presignedUrl,
+      fileName,
+      expiresIn: 900,
+      message: 'Presigned download URL generated successfully'
+    });
     
-    // Upload file to GCP
-    const bucket = storage.bucket(bucketName);
-    const blob = bucket.file(file.name);
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('Azure presigned download URL generation failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to generate presigned download URL', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+### Step 3: Create Presigned Delete API
+
+Create file: `src/app/api/azure/azure-delete/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { BlobServiceClient, StorageSharedKeyCredential, generateBlobSASQueryParameters, BlobSASPermissions } from '@azure/storage-blob';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
+
+// ... (same initialization code as above) ...
+
+export async function POST(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
+  try {
+    if (!blobServiceClient || !containerName) {
+      const response = NextResponse.json({ 
+        error: 'Azure Blob Service client not initialized' 
+      }, { status: 500 });
+      return addCorsHeaders(response, req);
+    }
+
+    const body = await req.json();
+    const { fileName } = body;
+
+    if (!fileName) {
+      const response = NextResponse.json({ 
+        error: 'Missing required field: fileName is required' 
+      }, { status: 400 });
+      return addCorsHeaders(response, req);
+    }
+
+    // Get container client
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blobClient = containerClient.getBlobClient(fileName);
+
+    // Generate SAS URL for delete operation
+    const sasToken = generateBlobSASQueryParameters(
+      {
+        containerName,
+        blobName: fileName,
+        permissions: BlobSASPermissions.parse("d"), // Delete permission
+        startsOn: new Date(),
+        expiresOn: new Date(new Date().valueOf() + 5 * 60 * 1000), // 5 minutes
+      },
+      blobServiceClient.credential as StorageSharedKeyCredential
+    ).toString();
+
+    const presignedUrl = `${blobClient.url}?${sasToken}`;
+
+    const response = NextResponse.json({
+      presignedUrl,
+      fileName,
+      expiresIn: 300,
+      message: 'Presigned delete URL generated successfully'
+    });
     
-    await blob.save(buffer, {
-      metadata: {
-        contentType: file.type,
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('Azure presigned delete URL generation failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to generate presigned delete URL', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+### Step 4: Create Upload Complete API
+
+Create file: `src/app/api/azure/azure-response/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
+
+export async function POST(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
+  try {
+    const body = await req.json();
+    const { fileName, fileSize, uploadTime } = body;
+
+    if (!fileName) {
+      const response = NextResponse.json({ 
+        error: 'Missing required field: fileName is required' 
+      }, { status: 400 });
+      return addCorsHeaders(response, req);
+    }
+
+    // Log upload completion for audit purposes
+    console.log(`Azure upload completed for file: ${fileName}, size: ${fileSize || 'unknown'}, time: ${uploadTime || new Date().toISOString()}`);
+
+    const response = NextResponse.json({
+      message: 'Azure upload completion recorded successfully',
+      fileName,
+      recordedAt: new Date().toISOString()
+    });
+    
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('Azure upload completion notification failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to record upload completion', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+### Step 5: Create List API
+
+Create file: `src/app/api/azure/azure-list/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { BlobServiceClient, StorageSharedKeyCredential } from '@azure/storage-blob';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
+
+// ... (same initialization code as above) ...
+
+export async function GET(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
+  try {
+    if (!blobServiceClient || !containerName) {
+      const response = NextResponse.json({ 
+        error: 'Azure Blob Service client not initialized' 
+      }, { status: 500 });
+      return addCorsHeaders(response, req);
+    }
+
+    // Get container client and list blobs
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const fileList = [];
+
+    // List all blobs in the container
+    for await (const blob of containerClient.listBlobsFlat()) {
+      fileList.push({
+        name: blob.name,
+        size: blob.properties.contentLength || 0,
+        lastModified: blob.properties.lastModified?.toISOString() || new Date().toISOString(),
+      });
+    }
+
+    const response = NextResponse.json({ files: fileList });
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('Azure list files failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to list files', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+## 🎨 Frontend Integration
+
+### Step 1: Update Upload Page
+
+Update your upload page (`src/app/page.tsx`) to support Azure:
+
+```typescript
+const handleUpload = async () => {
+  if (!selectedFile) {
+    toast.error('Please select an image first')
+    return
+  }
+
+  setIsUploading(true)
+  setUploadResponse(null)
+
+  try {
+    // Determine API endpoint based on selected provider
+    let apiEndpoint: string;
+    let responseEndpoint: string;
+    
+    switch (cloudProvider) {
+      case 'aws-s3':
+        apiEndpoint = '/api/aws/aws-post';
+        responseEndpoint = '/api/aws/aws-response';
+        break;
+      case 'azure-blob':
+        apiEndpoint = '/api/azure/azure-post';
+        responseEndpoint = '/api/azure/azure-response';
+        break;
+      case 'gcp-storage':
+        apiEndpoint = '/api/gcp/gcp-post';
+        responseEndpoint = '/api/gcp/gcp-response';
+        break;
+      default:
+        throw new Error('Unsupported cloud provider');
+    }
+
+    // Step 1: Get presigned upload URL from backend
+    const presignedUrlResponse = await fetch(apiEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        fileName: selectedFile.name,
+        fileType: selectedFile.type,
+        fileSize: selectedFile.size,
+      }),
+    });
+
+    if (!presignedUrlResponse.ok) {
+      const errorData = await presignedUrlResponse.json();
+      throw new Error(errorData.error || 'Failed to get upload URL');
+    }
+
+    const { presignedUrl, fileName } = await presignedUrlResponse.json();
+
+    // Step 2: Upload directly to Azure using presigned URL
+    const uploadResponse = await fetch(presignedUrl, {
+      method: 'PUT',
+      body: selectedFile,
+      headers: {
+        'Content-Type': selectedFile.type,
       },
     });
-    
-    return NextResponse.json({ message: 'Upload successful' });
-  } catch (err) {
-    console.error('GCP upload failed:', err);
-    return NextResponse.json({ 
-      error: 'Upload failed', 
-      details: err instanceof Error ? err.message : String(err) 
-    }, { status: 500 });
-  }
-}
 
-// GET: Download file or list all files
-export async function GET(req: NextRequest) {
-  try {
-    if (!storage || !bucketName) {
-      return NextResponse.json({ 
-        error: 'GCP client not initialized. Please check environment variables.' 
-      }, { status: 500 });
+    if (!uploadResponse.ok) {
+      throw new Error(`Failed to upload file to ${getProviderName(cloudProvider)}`);
     }
-    
-    const { searchParams } = new URL(req.url);
-    const key = searchParams.get('key');
-    const bucket = storage.bucket(bucketName);
-    
-    if (key) {
-      // Download a file
-      try {
-        const blob = bucket.file(key);
-        const [exists] = await blob.exists();
-        
-        if (!exists) {
-          return NextResponse.json({ error: 'File not found' }, { status: 404 });
-        }
-        
-        // Generate signed URL for download
-        const [signedUrl] = await blob.getSignedUrl({
-          action: 'read',
-          expires: Date.now() + 15 * 60 * 1000, // 15 minutes
-        });
-        
-        // Download the file content
-        const [fileContent] = await blob.download();
-        
-        // Get metadata
-        const [metadata] = await blob.getMetadata();
-        
-        return new NextResponse(fileContent, {
-          status: 200,
-          headers: {
-            'Content-Type': metadata.contentType || 'application/octet-stream',
-            'Content-Disposition': `attachment; filename="${key}"`,
-          },
-        });
-      } catch (err) {
-        console.error('GCP download failed:', err);
-        return NextResponse.json({ 
-          error: 'GetFile failed', 
-          details: err instanceof Error ? err.message : String(err) 
-        }, { status: 500 });
-      }
-    } else {
-      // List all files
-      try {
-        const [files] = await bucket.getFiles();
-        const fileList = files.map(file => ({
-          name: file.name,
-          size: file.metadata?.size,
-          lastModified: file.metadata?.updated,
-          contentType: file.metadata?.contentType,
-        }));
-        
-        return NextResponse.json({ files: fileList });
-      } catch (err) {
-        console.error('GCP list files failed:', err);
-        return NextResponse.json({ 
-          error: 'ListFiles failed', 
-          details: err instanceof Error ? err.message : String(err) 
-        }, { status: 500 });
-      }
-    }
-  } catch (err) {
-    console.error('GCP GET failed:', err);
-    return NextResponse.json({ 
-      error: 'GCP operation failed', 
-      details: err instanceof Error ? err.message : String(err) 
-    }, { status: 500 });
-  }
-}
 
-// DELETE: Remove file from GCP Cloud Storage
-export async function DELETE(req: NextRequest) {
-  try {
-    if (!storage || !bucketName) {
-      return NextResponse.json({ 
-        error: 'GCP client not initialized. Please check environment variables.' 
-      }, { status: 500 });
-    }
-    
-    const { searchParams } = new URL(req.url);
-    const key = searchParams.get('key');
-    if (!key) {
-      return NextResponse.json({ error: 'No key provided' }, { status: 400 });
-    }
-    
-    const bucket = storage.bucket(bucketName);
-    const blob = bucket.file(key);
-    
-    // Check if file exists
-    const [exists] = await blob.exists();
-    if (!exists) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 });
-    }
-    
-    // Delete the file
-    await blob.delete();
-    
-    return NextResponse.json({ message: 'Delete successful' });
-  } catch (err) {
-    console.error('GCP delete failed:', err);
-    return NextResponse.json({ 
-      error: 'DeleteFile failed', 
-      details: err instanceof Error ? err.message : String(err) 
-    }, { status: 500 });
-  }
-}
-```
-
-### Step 4: Frontend Integration
-
-Update your upload page (`src/app/page.tsx`) to use GCP:
-
-```typescript
-const handleUpload = async (file: File) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('provider', 'gcp-storage');
-
-  try {
-    const response = await fetch('/api/gcp', {
+    // Step 3: Notify backend of successful upload
+    await fetch(responseEndpoint, {
       method: 'POST',
-      body: formData,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        fileName,
+        fileSize: selectedFile.size,
+        uploadTime: new Date().toISOString(),
+      }),
     });
-    
-    if (response.ok) {
-      toast.success('File uploaded successfully!');
-    } else {
-      toast.error('Upload failed');
-    }
-  } catch (error) {
-    toast.error('Upload failed');
-  }
-};
-```
 
-Update your files page (`src/app/files/page.tsx`) to list GCP files:
+    const response: UploadResponse = {
+      success: true,
+      message: `Image uploaded to ${getProviderName(cloudProvider)} successfully!`,
+      provider: cloudProvider,
+    };
+    setUploadResponse(response);
+    toast.success(response.message);
 
-```typescript
-const loadFiles = async () => {
-  try {
-    const response = await fetch('/api/gcp');
-    if (response.ok) {
-      const data = await response.json();
-      setFiles(data.files || []);
-    }
+    // Clear file after successful upload
+    setTimeout(() => {
+      setSelectedFile(null);
+      setUploadResponse(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }, 3000);
   } catch (error) {
-    console.error('Failed to load files:', error);
-  }
-};
-
-const handleDeleteFile = async (fileName: string) => {
-  try {
-    const response = await fetch(`/api/gcp?key=${encodeURIComponent(fileName)}`, {
-      method: 'DELETE',
-    });
-    
-    if (response.ok) {
-      toast.success('File deleted successfully!');
-      loadFiles(); // Reload the file list
-    } else {
-      toast.error('Delete failed');
-    }
-  } catch (error) {
-    toast.error('Delete failed');
+    const response: UploadResponse = {
+      success: false,
+      message: error instanceof Error ? error.message : 'Upload failed due to network error',
+      provider: cloudProvider,
+    };
+    setUploadResponse(response);
+    toast.error(response.message);
+  } finally {
+    setIsUploading(false);
   }
 };
 ```
 
 ## 🧪 Testing
 
-### Test Upload
+### Test Presigned URL Upload
 
 ```bash
 # Start development server
 npm run dev
 
 # Navigate to http://localhost:3000
-# Select GCP Storage as provider
+# Select Azure Blob Storage as provider
 # Upload an image file
-# Check for success notification
+# Check browser network tab for presigned URL requests
+# Verify file appears in Azure container
 ```
 
 ### Test File Management
 
 ```bash
 # Navigate to http://localhost:3000/files
-# Select GCP Storage provider
-# Verify uploaded files appear
-# Test download and delete functionality
+# Select Azure Blob Storage provider
+# Verify uploaded files appear with image previews
+# Test download (opens in new tab)
+# Test delete functionality
 ```
 
-### Verify in GCP Console
+### Verify Security
 
-1. Go to Cloud Storage Console
-2. Navigate to your bucket
-3. Confirm files are uploaded correctly
-4. Check file permissions and metadata
+1. **Check Network Tab**
+   - No Azure credentials in frontend requests
+   - Only SAS URLs are used for direct Azure access
+   - All operations go through your backend first
+
+2. **Check Azure Container**
+   - Files are uploaded with unique timestamps
+   - No public access (private container)
+   - CORS properly configured
 
 ## 🔧 Troubleshooting
 
 ### Common Issues
 
-1. **"Service Account Not Found" Error**
+1. **CORS Errors**
    ```bash
-   # Check service account JSON file path
-   GOOGLE_APPLICATION_CREDENTIALS=./gcp-service-account.json
+   # Error: "No 'Access-Control-Allow-Origin' header is present"
+   # Solution: Update Azure CORS configuration in Resource sharing (CORS)
    ```
 
-2. **"Bucket Not Found" Error**
+2. **SAS URL Expired**
    ```bash
-   # Verify environment variables:
-   GCP_BUCKET_NAME=your-actual-bucket-name
+   # Error: "AuthenticationFailed"
+   # Solution: URLs expire after configured time (1h upload, 15m download, 5m delete)
    ```
 
-3. **"Permission Denied" Error**
+3. **Upload Failures**
    ```bash
-   # Check service account has these roles:
-   - Storage Object Admin
-   - Storage Object Viewer
-   - Storage Object Creator
+   # Check CORS configuration includes your origin
+   # Verify storage account permissions
+   # Check file size limits (Azure default: 190.7 TB)
    ```
 
-4. **"API Not Enabled" Error**
+4. **Authentication Errors**
    ```bash
-   # Enable Cloud Storage API in GCP Console
-   # Go to APIs & Services → Library → Cloud Storage API
+   # Check environment variables are set correctly
+   # Verify storage account name and key
+   # Ensure container exists and is accessible
    ```
 
 ### Debug Commands
 
 ```bash
 # Check environment variables
-echo $GCP_BUCKET_NAME
-echo $GOOGLE_APPLICATION_CREDENTIALS
+echo $AZURE_STORAGE_ACCOUNT_NAME
+echo $AZURE_STORAGE_ACCOUNT_KEY
+echo $AZURE_STORAGE_CONTAINER_NAME
 
-# Test GCP authentication
-gcloud auth application-default login
-
-# List GCP buckets
-gsutil ls
+# Test Azure connection
+az storage blob list --container-name your-container-name --account-name your-account-name
 ```
 
 ## 🔒 Security Best Practices
 
-### Service Account Security
+### SAS URL Security
+
+```bash
+# ✅ Time-limited access (1h upload, 15m download, 5m delete)
+# ✅ Operation-specific permissions (w, r, d)
+# ✅ No credentials exposed to frontend
+# ✅ CORS properly configured
+# ✅ Private container access
+```
+
+### Storage Account Security
 
 ```bash
 # Use least-privilege access
-# Regularly rotate service account keys
-# Consider using Workload Identity for production
-# Enable audit logging
-```
-
-### Bucket Security
-
-```bash
-# Set up bucket IAM policies
-# Enable object versioning for important files
-# Configure lifecycle policies
-# Set up monitoring and alerting
+# Regularly rotate access keys
+# Enable soft delete for blobs
+# Use Azure Key Vault for secrets
+# Enable storage account firewall
 ```
 
 ### Environment Variables
 
 ```bash
-# Never commit service account JSON to version control
-# Use different service accounts for dev/prod
-# Consider using Secret Manager for production
-# Regularly audit service account permissions
+# Never commit .env.local to version control
+# Use different credentials for dev/prod
+# Consider using Azure Key Vault for production
+# Regularly audit access keys
 ```
 
 ## 📚 Additional Resources
 
-- [Google Cloud Storage Documentation](https://cloud.google.com/storage/docs)
-- [Node.js Client Library](https://cloud.google.com/storage/docs/reference/libraries)
-- [Service Accounts Best Practices](https://cloud.google.com/iam/docs/service-accounts)
-- [Cloud Storage Security](https://cloud.google.com/storage/docs/security)
+- [Azure Blob Storage Documentation](https://docs.microsoft.com/en-us/azure/storage/blobs/)
+- [Azure Storage Blob SDK for JavaScript](https://docs.microsoft.com/en-us/javascript/api/overview/azure/storage-blob-readme)
+- [Azure SAS URLs](https://docs.microsoft.com/en-us/azure/storage/common/storage-sas-overview)
+- [Azure CORS Configuration](https://docs.microsoft.com/en-us/rest/api/storageservices/cross-origin-resource-sharing--cors--support-for-the-azure-storage-services)
+- [Azure Security Best Practices](https://docs.microsoft.com/en-us/azure/storage/common/storage-security-guide)
 
 ## 🎯 Next Steps
 
-After implementing GCP Cloud Storage:
+After implementing Azure Blob Storage with presigned URLs:
 
-1. **Test all functionality** (upload, download, delete, list)
-2. **Implement error handling** and user feedback
-3. **Add file validation** (size, type, etc.)
-4. **Consider implementing** file compression and optimization
-5. **Set up monitoring** and logging
-6. **Plan for production** deployment
+1. **Test all functionality** (upload, download, delete, list, preview)
+2. **Implement for AWS and GCP** using same presigned URL pattern
+3. **Add user authentication** and file ownership
+4. **Add file metadata** storage in database
+5. **Implement file versioning** and backup
+6. **Set up monitoring** and audit logging
+7. **Plan for production** deployment with proper security
 
 ---
 

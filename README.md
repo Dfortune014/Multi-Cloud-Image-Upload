@@ -13,13 +13,15 @@ A modern, responsive web application for uploading and managing images across mu
 ## ✨ Features
 
 - **🔄 Multi-Cloud Support**: Upload to AWS S3, Azure Blob Storage, or GCP Cloud Storage
+- **🔐 Presigned URLs**: Secure, time-limited URLs for direct cloud storage access
 - **📱 Responsive Design**: Beautiful UI that works on desktop and mobile
 - **🖼️ Image Preview**: Automatic image thumbnails with fallback icons
 - **🗂️ File Management**: View, download, and delete files from any cloud provider
 - **📄 Pagination**: Efficient file browsing with pagination support
 - **🎨 Modern UI**: Built with Tailwind CSS and shadcn/ui components
 - **⚡ Real-time Feedback**: Toast notifications for all operations
-- **🔒 Secure**: Environment-based configuration for cloud credentials
+- **🔒 Secure**: No credentials exposed to frontend, all operations through backend
+- **🌐 CORS Support**: Properly configured for cross-origin requests
 
 ## 🚀 Quick Start
 
@@ -54,9 +56,11 @@ A modern, responsive web application for uploading and managing images across mu
    AWS_S3_BUCKET=your-bucket-name
 
    # Azure Blob Storage Configuration
-   AZURE_STORAGE_ACCOUNT_NAME=your-storage-account
-   AZURE_STORAGE_ACCOUNT_KEY=your-storage-key
-   AZURE_CONTAINER_NAME=your-container-name
+   AZURE_STORAGE_ACCOUNT_NAME=your-storage-account-name
+   AZURE_STORAGE_ACCOUNT_KEY=your-storage-account-key
+   AZURE_STORAGE_CONNECTION_STRING=your-connection-string
+   AZURE_STORAGE_CONTAINER_NAME=images
+   AZURE_STORAGE_SAS_TOKEN=your-sas-token
 
    # Google Cloud Platform Configuration
    GOOGLE_APPLICATION_CREDENTIALS=path/to/your/service-account-key.json
@@ -81,9 +85,24 @@ Multi-Cloud-Image-Upload/
 ├── src/
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── aws/route.ts          # AWS S3 API endpoints
-│   │   │   ├── azure/route.ts        # Azure Blob Storage API endpoints
-│   │   │   └── gcp/route.ts          # GCP Cloud Storage API endpoints
+│   │   │   ├── aws/
+│   │   │   │   ├── aws-post/route.ts      # AWS presigned upload URL generation
+│   │   │   │   ├── aws-get/route.ts       # AWS presigned download URL generation
+│   │   │   │   ├── aws-delete/route.ts    # AWS presigned delete URL generation
+│   │   │   │   ├── aws-list/route.ts      # AWS file listing
+│   │   │   │   └── aws-response/route.ts  # AWS upload completion notification
+│   │   │   ├── azure/
+│   │   │   │   ├── azure-post/route.ts    # Azure presigned upload URL generation
+│   │   │   │   ├── azure-get/route.ts     # Azure presigned download URL generation
+│   │   │   │   ├── azure-delete/route.ts  # Azure presigned delete URL generation
+│   │   │   │   ├── azure-list/route.ts    # Azure file listing
+│   │   │   │   └── azure-response/route.ts # Azure upload completion notification
+│   │   │   └── gcp/
+│   │   │       ├── gcp-post/route.ts      # GCP presigned upload URL generation
+│   │   │       ├── gcp-get/route.ts       # GCP presigned download URL generation
+│   │   │       ├── gcp-delete/route.ts    # GCP presigned delete URL generation
+│   │   │       ├── gcp-list/route.ts      # GCP file listing
+│   │   │       └── gcp-response/route.ts  # GCP upload completion notification
 │   │   ├── files/
 │   │   │   ├── page.tsx              # File management page
 │   │   │   └── layout.tsx            # Files page layout
@@ -94,9 +113,13 @@ Multi-Cloud-Image-Upload/
 │   │   ├── navigation.tsx            # Navigation component
 │   │   └── ui/                       # shadcn/ui components
 │   └── lib/
+│       ├── cors.ts                   # CORS middleware utilities
 │       ├── file-storage.ts           # File storage utilities
 │       └── utils.ts                  # Utility functions
 ├── .env.local                        # Environment variables
+├── aws-readme.md                     # AWS implementation guide
+├── azure-readme.md                   # Azure implementation guide
+├── gcp-readme.md                     # GCP implementation guide
 └── README.md                         # This file
 ```
 
@@ -188,6 +211,24 @@ Below are the basic setup steps for each cloud provider. For detailed instructio
 
 **📖 [View Complete GCP Setup Guide](gcp-readme.md)**
 
+## 🔐 Security Architecture
+
+This project uses **presigned URLs** for enhanced security:
+
+1. **Backend generates time-limited URLs** for each operation (upload, download, delete)
+2. **Frontend uses these URLs directly** with cloud storage (no credentials exposed)
+3. **URLs expire automatically** (1h upload, 15m download, 5m delete)
+4. **CORS properly configured** on all cloud storage buckets
+5. **All operations logged** for audit purposes
+
+### Why Presigned URLs?
+
+- ✅ **No credentials in frontend** - Backend handles all authentication
+- ✅ **Time-limited access** - URLs expire automatically
+- ✅ **Operation-specific permissions** - Each URL has specific permissions
+- ✅ **Direct cloud access** - Better performance than proxying through backend
+- ✅ **Audit trail** - All operations logged for security monitoring
+
 ## 🎯 Usage
 
 ### Uploading Images
@@ -209,20 +250,26 @@ Below are the basic setup steps for each cloud provider. For detailed instructio
 
 ## 🔧 API Endpoints
 
-### AWS S3 (`/api/aws`)
-- `POST` - Upload file to S3
-- `GET` - Download file or list all files
-- `DELETE` - Delete file from S3
+### AWS S3 Presigned URLs
+- `POST /api/aws/aws-post` - Generate presigned upload URL
+- `POST /api/aws/aws-get` - Generate presigned download URL
+- `POST /api/aws/aws-delete` - Generate presigned delete URL
+- `GET /api/aws/aws-list` - List all files in S3 bucket
+- `POST /api/aws/aws-response` - Upload completion notification
 
-### Azure Blob Storage (`/api/azure`)
-- `POST` - Upload file to Azure Blob
-- `GET` - Download file or list all blobs
-- `DELETE` - Delete blob from Azure
+### Azure Blob Storage SAS URLs
+- `POST /api/azure/azure-post` - Generate SAS upload URL
+- `POST /api/azure/azure-get` - Generate SAS download URL
+- `POST /api/azure/azure-delete` - Generate SAS delete URL
+- `GET /api/azure/azure-list` - List all blobs in container
+- `POST /api/azure/azure-response` - Upload completion notification
 
-### GCP Cloud Storage (`/api/gcp`)
-- `POST` - Upload file to GCP Cloud Storage
-- `GET` - Download file (with signed URLs) or list all files
-- `DELETE` - Delete file from GCP
+### GCP Cloud Storage Signed URLs
+- `POST /api/gcp/gcp-post` - Generate signed upload URL
+- `POST /api/gcp/gcp-get` - Generate signed download URL
+- `POST /api/gcp/gcp-delete` - Generate signed delete URL
+- `GET /api/gcp/gcp-list` - List all files in GCP bucket
+- `POST /api/gcp/gcp-response` - Upload completion notification
 
 ## 🛠️ Development
 

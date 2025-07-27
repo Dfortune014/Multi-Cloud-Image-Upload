@@ -1,6 +1,6 @@
 # 🚀 Google Cloud Platform (GCP) Implementation Guide
 
-Complete step-by-step guide to implement Google Cloud Storage integration in the Multi-Cloud Image Upload project.
+Complete step-by-step guide to implement Google Cloud Storage integration with **presigned URLs (signed URLs)** for enhanced security in the Multi-Cloud Image Upload project.
 
 ## 📋 Table of Contents
 
@@ -8,11 +8,13 @@ Complete step-by-step guide to implement Google Cloud Storage integration in the
 2. [GCP Console Setup](#gcp-console-setup)
 3. [Service Account Configuration](#service-account-configuration)
 4. [Cloud Storage Setup](#cloud-storage-setup)
-5. [Project Implementation](#project-implementation)
-6. [Code Implementation](#code-implementation)
-7. [Testing](#testing)
-8. [Troubleshooting](#troubleshooting)
-9. [Security Best Practices](#security-best-practices)
+5. [CORS Configuration](#cors-configuration)
+6. [Project Implementation](#project-implementation)
+7. [Presigned URL Implementation](#presigned-url-implementation)
+8. [Frontend Integration](#frontend-integration)
+9. [Testing](#testing)
+10. [Troubleshooting](#troubleshooting)
+11. [Security Best Practices](#security-best-practices)
 
 ## 🔧 Prerequisites
 
@@ -111,6 +113,44 @@ The service account should have these roles:
 - `Storage Object Viewer` - Read access to objects
 - `Storage Object Creator` - Create objects
 
+## 🛡️ CORS Configuration
+
+### Step 1: Configure CORS (Critical for Presigned URLs)
+
+**This is essential for presigned URL functionality!**
+
+1. **Navigate to Cloud Storage**
+   - Go to "Cloud Storage" → "Buckets"
+   - Click on your bucket name
+
+2. **Configure CORS**
+   - Click on the "CORS" tab
+   - Click "Add CORS rule"
+
+3. **Add CORS Rule**
+   ```json
+   [
+     {
+       "origin": [
+         "http://localhost:3000",
+         "https://localhost:3000",
+         "http://localhost:3001",
+         "https://localhost:3001",
+         "http://127.0.0.1:3000",
+         "https://127.0.0.1:3000",
+         "http://127.0.0.1:3001",
+         "https://127.0.0.1:3001"
+       ],
+       "method": ["GET", "POST", "PUT", "DELETE", "HEAD"],
+       "responseHeader": ["*"],
+       "maxAgeSeconds": 3600
+     }
+   ]
+   ```
+
+4. **Save Configuration**
+   - Click "Save" to apply the CORS rule
+
 ## 📦 Project Implementation
 
 ### Step 1: Install Dependencies
@@ -133,13 +173,16 @@ GCP_BUCKET_NAME=cloud-uploader-bucket
 GOOGLE_APPLICATION_CREDENTIALS=./gcp-service-account.json
 ```
 
-### Step 3: Create API Route
+## 🔐 Presigned URL Implementation
 
-Create file: `src/app/api/gcp/route.ts`
+### Step 1: Create Presigned Upload API
+
+Create file: `src/app/api/gcp/gcp-post/route.ts`
 
 ```typescript
-import { Storage } from '@google-cloud/storage';
 import { NextRequest, NextResponse } from 'next/server';
+import { Storage } from '@google-cloud/storage';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
 
 // Validate environment variables
 const validateGcpEnv = () => {
@@ -167,278 +210,475 @@ try {
   console.error('GCP client initialization failed:', error);
 }
 
-// POST: Upload file to GCP Cloud Storage
 export async function POST(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
   try {
     if (!storage || !bucketName) {
-      return NextResponse.json({ 
+      const response = NextResponse.json({ 
         error: 'GCP client not initialized. Please check environment variables.' 
       }, { status: 500 });
+      return addCorsHeaders(response, req);
     }
-    
-    const formData = await req.formData();
-    const file = formData.get('file') as File;
-    if (!file) {
-      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+
+    const body = await req.json();
+    const { fileName, fileType, fileSize } = body;
+
+    if (!fileName || !fileType) {
+      const response = NextResponse.json({ 
+        error: 'Missing required fields: fileName and fileType are required' 
+      }, { status: 400 });
+      return addCorsHeaders(response, req);
     }
-    
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    
-    // Upload file to GCP
+
+    // Generate unique filename
+    const timestamp = Date.now();
+    const uniqueFileName = `${timestamp}-${fileName}`;
+
+    // Get bucket and file reference
     const bucket = storage.bucket(bucketName);
-    const blob = bucket.file(file.name);
+    const file = bucket.file(uniqueFileName);
+
+    // Generate signed URL for upload (write action)
+    const [signedUrl] = await file.getSignedUrl({
+      version: 'v4',
+      action: 'write',
+      expires: Date.now() + 60 * 60 * 1000, // 1 hour
+      contentType: fileType,
+    });
+
+    // Log the request for audit purposes
+    console.log(`GCP presigned upload URL generated for file: ${uniqueFileName}`);
+
+    const response = NextResponse.json({
+      presignedUrl: signedUrl,
+      fileName: uniqueFileName,
+      expiresIn: 3600,
+      message: 'Presigned upload URL generated successfully'
+    });
     
-    await blob.save(buffer, {
-      metadata: {
-        contentType: file.type,
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('GCP presigned upload URL generation failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to generate presigned upload URL', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+### Step 2: Create Presigned Download API
+
+Create file: `src/app/api/gcp/gcp-get/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { Storage } from '@google-cloud/storage';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
+
+// ... (same initialization code as above) ...
+
+export async function POST(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
+  try {
+    if (!storage || !bucketName) {
+      const response = NextResponse.json({ 
+        error: 'GCP client not initialized. Please check environment variables.' 
+      }, { status: 500 });
+      return addCorsHeaders(response, req);
+    }
+
+    const body = await req.json();
+    const { fileName } = body;
+
+    if (!fileName) {
+      const response = NextResponse.json({ 
+        error: 'Missing required field: fileName is required' 
+      }, { status: 400 });
+      return addCorsHeaders(response, req);
+    }
+
+    // Get bucket and file reference
+    const bucket = storage.bucket(bucketName);
+    const file = bucket.file(fileName);
+
+    // Generate signed URL for download (read action)
+    const [signedUrl] = await file.getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + 15 * 60 * 1000, // 15 minutes
+    });
+
+    // Log the request for audit purposes
+    console.log(`GCP presigned download URL generated for file: ${fileName}`);
+
+    const response = NextResponse.json({
+      presignedUrl: signedUrl,
+      fileName,
+      expiresIn: 900,
+      message: 'Presigned download URL generated successfully'
+    });
+    
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('GCP presigned download URL generation failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to generate presigned download URL', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+### Step 3: Create Presigned Delete API
+
+Create file: `src/app/api/gcp/gcp-delete/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { Storage } from '@google-cloud/storage';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
+
+// ... (same initialization code as above) ...
+
+export async function POST(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
+  try {
+    if (!storage || !bucketName) {
+      const response = NextResponse.json({ 
+        error: 'GCP client not initialized. Please check environment variables.' 
+      }, { status: 500 });
+      return addCorsHeaders(response, req);
+    }
+
+    const body = await req.json();
+    const { fileName } = body;
+
+    if (!fileName) {
+      const response = NextResponse.json({ 
+        error: 'Missing required field: fileName is required' 
+      }, { status: 400 });
+      return addCorsHeaders(response, req);
+    }
+
+    // Get bucket and file reference
+    const bucket = storage.bucket(bucketName);
+    const file = bucket.file(fileName);
+
+    // Generate signed URL for delete action
+    const [signedUrl] = await file.getSignedUrl({
+      version: 'v4',
+      action: 'delete',
+      expires: Date.now() + 5 * 60 * 1000, // 5 minutes
+    });
+
+    // Log the request for audit purposes
+    console.log(`GCP presigned delete URL generated for file: ${fileName}`);
+
+    const response = NextResponse.json({
+      presignedUrl: signedUrl,
+      fileName,
+      expiresIn: 300,
+      message: 'Presigned delete URL generated successfully'
+    });
+    
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('GCP presigned delete URL generation failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to generate presigned delete URL', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+### Step 4: Create Upload Complete API
+
+Create file: `src/app/api/gcp/gcp-response/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
+
+export async function POST(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
+  try {
+    const body = await req.json();
+    const { fileName, fileSize, uploadTime } = body;
+
+    if (!fileName) {
+      const response = NextResponse.json({ 
+        error: 'Missing required field: fileName is required' 
+      }, { status: 400 });
+      return addCorsHeaders(response, req);
+    }
+
+    // Log upload completion for audit purposes
+    console.log(`GCP upload completed for file: ${fileName}, size: ${fileSize || 'unknown'}, time: ${uploadTime || new Date().toISOString()}`);
+
+    const response = NextResponse.json({
+      message: 'GCP upload completion recorded successfully',
+      fileName,
+      recordedAt: new Date().toISOString()
+    });
+    
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('GCP upload completion notification failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to record upload completion', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+### Step 5: Create List API
+
+Create file: `src/app/api/gcp/gcp-list/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { Storage } from '@google-cloud/storage';
+import { corsMiddleware, addCorsHeaders } from '@/lib/cors';
+
+// ... (same initialization code as above) ...
+
+export async function GET(req: NextRequest) {
+  const corsResponse = corsMiddleware(req);
+  if (corsResponse) return corsResponse;
+
+  try {
+    if (!storage || !bucketName) {
+      const response = NextResponse.json({ 
+        error: 'GCP client not initialized. Please check environment variables.' 
+      }, { status: 500 });
+      return addCorsHeaders(response, req);
+    }
+
+    // Get bucket and list files
+    const bucket = storage.bucket(bucketName);
+    const [files] = await bucket.getFiles();
+    
+    const fileList = files.map(file => ({
+      name: file.name,
+      size: file.metadata?.size || 0,
+      lastModified: file.metadata?.updated || new Date().toISOString(),
+    }));
+
+    // Log the request for audit purposes
+    console.log(`Listed ${fileList.length} files from GCP bucket`);
+
+    const response = NextResponse.json({ files: fileList });
+    return addCorsHeaders(response, req);
+
+  } catch (err) {
+    console.error('GCP list files failed:', err);
+    const response = NextResponse.json({ 
+      error: 'Failed to list files', 
+      details: err instanceof Error ? err.message : String(err) 
+    }, { status: 500 });
+    return addCorsHeaders(response, req);
+  }
+}
+```
+
+## 🎨 Frontend Integration
+
+### Step 1: Update Upload Page
+
+Update your upload page (`src/app/page.tsx`) to support GCP:
+
+```typescript
+const handleUpload = async () => {
+  if (!selectedFile) {
+    toast.error('Please select an image first')
+    return
+  }
+
+  setIsUploading(true)
+  setUploadResponse(null)
+
+  try {
+    // Determine API endpoint based on selected provider
+    let apiEndpoint: string;
+    let responseEndpoint: string;
+    
+    switch (cloudProvider) {
+      case 'aws-s3':
+        apiEndpoint = '/api/aws/aws-post';
+        responseEndpoint = '/api/aws/aws-response';
+        break;
+      case 'azure-blob':
+        apiEndpoint = '/api/azure/azure-post';
+        responseEndpoint = '/api/azure/azure-response';
+        break;
+      case 'gcp-storage':
+        apiEndpoint = '/api/gcp/gcp-post';
+        responseEndpoint = '/api/gcp/gcp-response';
+        break;
+      default:
+        throw new Error('Unsupported cloud provider');
+    }
+
+    // Step 1: Get presigned upload URL from backend
+    const presignedUrlResponse = await fetch(apiEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        fileName: selectedFile.name,
+        fileType: selectedFile.type,
+        fileSize: selectedFile.size,
+      }),
+    });
+
+    if (!presignedUrlResponse.ok) {
+      const errorData = await presignedUrlResponse.json();
+      throw new Error(errorData.error || 'Failed to get upload URL');
+    }
+
+    const { presignedUrl, fileName } = await presignedUrlResponse.json();
+
+    // Step 2: Upload directly to GCP using presigned URL
+    const uploadResponse = await fetch(presignedUrl, {
+      method: 'PUT',
+      body: selectedFile,
+      headers: {
+        'Content-Type': selectedFile.type,
       },
     });
-    
-    return NextResponse.json({ message: 'Upload successful' });
-  } catch (err) {
-    console.error('GCP upload failed:', err);
-    return NextResponse.json({ 
-      error: 'Upload failed', 
-      details: err instanceof Error ? err.message : String(err) 
-    }, { status: 500 });
-  }
-}
 
-// GET: Download file or list all files
-export async function GET(req: NextRequest) {
-  try {
-    if (!storage || !bucketName) {
-      return NextResponse.json({ 
-        error: 'GCP client not initialized. Please check environment variables.' 
-      }, { status: 500 });
+    if (!uploadResponse.ok) {
+      throw new Error(`Failed to upload file to ${getProviderName(cloudProvider)}`);
     }
-    
-    const { searchParams } = new URL(req.url);
-    const key = searchParams.get('key');
-    const bucket = storage.bucket(bucketName);
-    
-    if (key) {
-      // Download a file
-      try {
-        const blob = bucket.file(key);
-        const [exists] = await blob.exists();
-        
-        if (!exists) {
-          return NextResponse.json({ error: 'File not found' }, { status: 404 });
-        }
-        
-        // Generate signed URL for download
-        const [signedUrl] = await blob.getSignedUrl({
-          action: 'read',
-          expires: Date.now() + 15 * 60 * 1000, // 15 minutes
-        });
-        
-        // Download the file content
-        const [fileContent] = await blob.download();
-        
-        // Get metadata
-        const [metadata] = await blob.getMetadata();
-        
-        return new NextResponse(fileContent, {
-          status: 200,
-          headers: {
-            'Content-Type': metadata.contentType || 'application/octet-stream',
-            'Content-Disposition': `attachment; filename="${key}"`,
-          },
-        });
-      } catch (err) {
-        console.error('GCP download failed:', err);
-        return NextResponse.json({ 
-          error: 'GetFile failed', 
-          details: err instanceof Error ? err.message : String(err) 
-        }, { status: 500 });
-      }
-    } else {
-      // List all files
-      try {
-        const [files] = await bucket.getFiles();
-        const fileList = files.map(file => ({
-          name: file.name,
-          size: file.metadata?.size,
-          lastModified: file.metadata?.updated,
-          contentType: file.metadata?.contentType,
-        }));
-        
-        return NextResponse.json({ files: fileList });
-      } catch (err) {
-        console.error('GCP list files failed:', err);
-        return NextResponse.json({ 
-          error: 'ListFiles failed', 
-          details: err instanceof Error ? err.message : String(err) 
-        }, { status: 500 });
-      }
-    }
-  } catch (err) {
-    console.error('GCP GET failed:', err);
-    return NextResponse.json({ 
-      error: 'GCP operation failed', 
-      details: err instanceof Error ? err.message : String(err) 
-    }, { status: 500 });
-  }
-}
 
-// DELETE: Remove file from GCP Cloud Storage
-export async function DELETE(req: NextRequest) {
-  try {
-    if (!storage || !bucketName) {
-      return NextResponse.json({ 
-        error: 'GCP client not initialized. Please check environment variables.' 
-      }, { status: 500 });
-    }
-    
-    const { searchParams } = new URL(req.url);
-    const key = searchParams.get('key');
-    if (!key) {
-      return NextResponse.json({ error: 'No key provided' }, { status: 400 });
-    }
-    
-    const bucket = storage.bucket(bucketName);
-    const blob = bucket.file(key);
-    
-    // Check if file exists
-    const [exists] = await blob.exists();
-    if (!exists) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 });
-    }
-    
-    // Delete the file
-    await blob.delete();
-    
-    return NextResponse.json({ message: 'Delete successful' });
-  } catch (err) {
-    console.error('GCP delete failed:', err);
-    return NextResponse.json({ 
-      error: 'DeleteFile failed', 
-      details: err instanceof Error ? err.message : String(err) 
-    }, { status: 500 });
-  }
-}
-```
-
-### Step 4: Frontend Integration
-
-Update your upload page (`src/app/page.tsx`) to use GCP:
-
-```typescript
-const handleUpload = async (file: File) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('provider', 'gcp-storage');
-
-  try {
-    const response = await fetch('/api/gcp', {
+    // Step 3: Notify backend of successful upload
+    await fetch(responseEndpoint, {
       method: 'POST',
-      body: formData,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        fileName,
+        fileSize: selectedFile.size,
+        uploadTime: new Date().toISOString(),
+      }),
     });
-    
-    if (response.ok) {
-      toast.success('File uploaded successfully!');
-    } else {
-      toast.error('Upload failed');
-    }
-  } catch (error) {
-    toast.error('Upload failed');
-  }
-};
-```
 
-Update your files page (`src/app/files/page.tsx`) to list GCP files:
+    const response: UploadResponse = {
+      success: true,
+      message: `Image uploaded to ${getProviderName(cloudProvider)} successfully!`,
+      provider: cloudProvider,
+    };
+    setUploadResponse(response);
+    toast.success(response.message);
 
-```typescript
-const loadFiles = async () => {
-  try {
-    const response = await fetch('/api/gcp');
-    if (response.ok) {
-      const data = await response.json();
-      setFiles(data.files || []);
-    }
+    // Clear file after successful upload
+    setTimeout(() => {
+      setSelectedFile(null);
+      setUploadResponse(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }, 3000);
   } catch (error) {
-    console.error('Failed to load files:', error);
-  }
-};
-
-const handleDeleteFile = async (fileName: string) => {
-  try {
-    const response = await fetch(`/api/gcp?key=${encodeURIComponent(fileName)}`, {
-      method: 'DELETE',
-    });
-    
-    if (response.ok) {
-      toast.success('File deleted successfully!');
-      loadFiles(); // Reload the file list
-    } else {
-      toast.error('Delete failed');
-    }
-  } catch (error) {
-    toast.error('Delete failed');
+    const response: UploadResponse = {
+      success: false,
+      message: error instanceof Error ? error.message : 'Upload failed due to network error',
+      provider: cloudProvider,
+    };
+    setUploadResponse(response);
+    toast.error(response.message);
+  } finally {
+    setIsUploading(false);
   }
 };
 ```
 
 ## 🧪 Testing
 
-### Test Upload
+### Test Presigned URL Upload
 
 ```bash
 # Start development server
 npm run dev
 
 # Navigate to http://localhost:3000
-# Select GCP Storage as provider
+# Select GCP Cloud Storage as provider
 # Upload an image file
-# Check for success notification
+# Check browser network tab for presigned URL requests
+# Verify file appears in GCP bucket
 ```
 
 ### Test File Management
 
 ```bash
 # Navigate to http://localhost:3000/files
-# Select GCP Storage provider
-# Verify uploaded files appear
-# Test download and delete functionality
+# Select GCP Cloud Storage provider
+# Verify uploaded files appear with image previews
+# Test download (opens in new tab)
+# Test delete functionality
 ```
 
-### Verify in GCP Console
+### Verify Security
 
-1. Go to Cloud Storage Console
-2. Navigate to your bucket
-3. Confirm files are uploaded correctly
-4. Check file permissions and metadata
+1. **Check Network Tab**
+   - No GCP credentials in frontend requests
+   - Only signed URLs are used for direct GCP access
+   - All operations go through your backend first
+
+2. **Check GCP Bucket**
+   - Files are uploaded with unique timestamps
+   - No public access (uniform bucket-level access)
+   - CORS properly configured
 
 ## 🔧 Troubleshooting
 
 ### Common Issues
 
-1. **"Service Account Not Found" Error**
+1. **CORS Errors**
    ```bash
-   # Check service account JSON file path
-   GOOGLE_APPLICATION_CREDENTIALS=./gcp-service-account.json
+   # Error: "No 'Access-Control-Allow-Origin' header is present"
+   # Solution: Update GCP CORS configuration in bucket settings
    ```
 
-2. **"Bucket Not Found" Error**
+2. **Signed URL Expired**
    ```bash
-   # Verify environment variables:
-   GCP_BUCKET_NAME=your-actual-bucket-name
+   # Error: "Access denied"
+   # Solution: URLs expire after configured time (1h upload, 15m download, 5m delete)
    ```
 
-3. **"Permission Denied" Error**
+3. **Upload Failures**
    ```bash
-   # Check service account has these roles:
-   - Storage Object Admin
-   - Storage Object Viewer
-   - Storage Object Creator
+   # Check CORS configuration includes your origin
+   # Verify service account permissions
+   # Check file size limits (GCP default: 5 TB)
    ```
 
-4. **"API Not Enabled" Error**
+4. **Authentication Errors**
    ```bash
-   # Enable Cloud Storage API in GCP Console
-   # Go to APIs & Services → Library → Cloud Storage API
+   # Check environment variables are set correctly
+   # Verify service account JSON file path
+   # Ensure bucket exists and is accessible
    ```
 
 ### Debug Commands
@@ -453,9 +693,22 @@ gcloud auth application-default login
 
 # List GCP buckets
 gsutil ls
+
+# Test bucket access
+gsutil ls gs://your-bucket-name
 ```
 
 ## 🔒 Security Best Practices
+
+### Signed URL Security
+
+```bash
+# ✅ Time-limited access (1h upload, 15m download, 5m delete)
+# ✅ Operation-specific permissions (write, read, delete)
+# ✅ No credentials exposed to frontend
+# ✅ CORS properly configured
+# ✅ Uniform bucket-level access
+```
 
 ### Service Account Security
 
@@ -488,19 +741,22 @@ gsutil ls
 
 - [Google Cloud Storage Documentation](https://cloud.google.com/storage/docs)
 - [Node.js Client Library](https://cloud.google.com/storage/docs/reference/libraries)
+- [Signed URLs](https://cloud.google.com/storage/docs/access-control/signed-urls)
+- [CORS Configuration](https://cloud.google.com/storage/docs/cross-origin)
 - [Service Accounts Best Practices](https://cloud.google.com/iam/docs/service-accounts)
 - [Cloud Storage Security](https://cloud.google.com/storage/docs/security)
 
 ## 🎯 Next Steps
 
-After implementing GCP Cloud Storage:
+After implementing GCP Cloud Storage with presigned URLs:
 
-1. **Test all functionality** (upload, download, delete, list)
-2. **Implement error handling** and user feedback
-3. **Add file validation** (size, type, etc.)
-4. **Consider implementing** file compression and optimization
-5. **Set up monitoring** and logging
-6. **Plan for production** deployment
+1. **Test all functionality** (upload, download, delete, list, preview)
+2. **Implement for AWS and Azure** using same presigned URL pattern
+3. **Add user authentication** and file ownership
+4. **Add file metadata** storage in database
+5. **Implement file versioning** and backup
+6. **Set up monitoring** and audit logging
+7. **Plan for production** deployment with proper security
 
 ---
 

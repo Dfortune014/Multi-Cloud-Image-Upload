@@ -70,6 +70,14 @@ export default function ImageUploader() {
     }
   }
 
+  const getProviderName = (provider: CloudProvider): string => {
+    switch (provider) {
+      case 'aws-s3': return 'AWS S3'
+      case 'azure-blob': return 'Azure Blob Storage'
+      case 'gcp-storage': return 'GCP Cloud Storage'
+    }
+  }
+
   const handleUpload = async () => {
     if (!selectedFile) {
       toast.error('Please select an image first')
@@ -80,65 +88,99 @@ export default function ImageUploader() {
     setUploadResponse(null)
 
     try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('provider', cloudProvider);
+      // Determine API endpoint based on selected provider
+      let apiEndpoint: string;
+      let responseEndpoint: string;
+      
+      switch (cloudProvider) {
+        case 'aws-s3':
+          apiEndpoint = '/api/aws/aws-post';
+          responseEndpoint = '/api/aws/aws-response';
+          break;
+        case 'gcp-storage':
+          apiEndpoint = '/api/gcp/gcp-post';
+          responseEndpoint = '/api/gcp/gcp-response';
+          break;
+        case 'azure-blob':
+          apiEndpoint = '/api/azure/azure-post';
+          responseEndpoint = '/api/azure/azure-response';
+          break;
+        default:
+          throw new Error('Unsupported cloud provider');
+      }
 
-      // Choose API endpoint based on provider
-      const apiEndpoint = cloudProvider === 'azure-blob' ? '/api/azure' : 
-                         cloudProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
-
-      const res = await fetch(apiEndpoint, {
+      // Step 1: Get presigned upload URL from backend
+      const presignedUrlResponse = await fetch(apiEndpoint, {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileName: selectedFile.name,
+          fileType: selectedFile.type,
+          fileSize: selectedFile.size,
+        }),
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        const response: UploadResponse = {
-          success: true,
-          message: data.message || `Image uploaded to ${getProviderName(cloudProvider)} successfully!`,
-          provider: cloudProvider,
-          // file: data.file // 
-        };
-        setUploadResponse(response);
-        toast.success(response.message);
-
-        // Clear the selected file after successful upload
-        setTimeout(() => {
-          setSelectedFile(null);
-          setUploadResponse(null);
-          if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-          }
-        }, 3000);
-      } else {
-        const response: UploadResponse = {
-          success: false,
-          message: data.error || `Failed to upload to ${getProviderName(cloudProvider)}. Please try again.`,
-          provider: cloudProvider,
-        };
-        setUploadResponse(response);
-        toast.error(response.message);
+      if (!presignedUrlResponse.ok) {
+        const errorData = await presignedUrlResponse.json();
+        throw new Error(errorData.error || 'Failed to get upload URL');
       }
+
+      const { presignedUrl, fileName } = await presignedUrlResponse.json();
+
+      // Step 2: Upload directly to cloud storage using presigned URL
+      const uploadResponse = await fetch(presignedUrl, {
+        method: 'PUT',
+        body: selectedFile,
+        headers: {
+          'Content-Type': selectedFile.type,
+        },
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Failed to upload file to ${getProviderName(cloudProvider)}`);
+      }
+
+      // Step 3: Notify backend of successful upload
+      await fetch(responseEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileName,
+          fileSize: selectedFile.size,
+          uploadTime: new Date().toISOString(),
+        }),
+      });
+
+      const response: UploadResponse = {
+        success: true,
+        message: `Image uploaded to ${getProviderName(cloudProvider)} successfully!`,
+        provider: cloudProvider,
+      };
+      setUploadResponse(response);
+      toast.success(response.message);
+
+      // Clear file after successful upload
+      setTimeout(() => {
+        setSelectedFile(null);
+        setUploadResponse(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      }, 3000);
     } catch (error) {
       const response: UploadResponse = {
         success: false,
-        message: 'Upload failed due to network error',
+        message: error instanceof Error ? error.message : 'Upload failed due to network error',
         provider: cloudProvider,
       };
       setUploadResponse(response);
       toast.error(response.message);
     } finally {
       setIsUploading(false);
-    }
-  }
-
-  const getProviderName = (provider: CloudProvider): string => {
-    switch (provider) {
-      case 'aws-s3': return 'AWS S3'
-      case 'azure-blob': return 'Azure Blob Storage'
-      case 'gcp-storage': return 'GCP Cloud Storage'
     }
   }
 

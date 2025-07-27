@@ -30,6 +30,80 @@ import {
   AlertCircle
 } from 'lucide-react'
 
+// Image Preview Component
+const ImagePreview = ({ fileName, provider = 'aws-s3' }: { fileName: string; provider?: string }) => {
+  const [imageUrl, setImageUrl] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    const loadImage = async () => {
+      try {
+        let apiEndpoint: string;
+        switch (provider) {
+          case 'gcp-storage':
+            apiEndpoint = '/api/gcp/gcp-get';
+            break;
+          case 'azure-blob':
+            apiEndpoint = '/api/azure/azure-get';
+            break;
+          case 'aws-s3':
+          default:
+            apiEndpoint = '/api/aws/aws-get';
+            break;
+        }
+
+        const presignedUrlResponse = await fetch(apiEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ fileName }),
+        });
+
+        if (!presignedUrlResponse.ok) {
+          throw new Error('Failed to get preview URL');
+        }
+
+        const { presignedUrl } = await presignedUrlResponse.json();
+        setImageUrl(presignedUrl);
+      } catch (error) {
+        console.error('Error loading image:', error);
+        setError(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadImage();
+  }, [fileName, provider]);
+
+  if (loading) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-400" />
+      </div>
+    );
+  }
+
+  if (error || !imageUrl) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <ImageIcon className="h-12 w-12 text-slate-400" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={imageUrl}
+      alt={fileName}
+      className="w-full h-full object-cover"
+      onError={() => setError(true)}
+    />
+  );
+};
+
 export default function FilesPage() {
   const [files, setFiles] = useState<any[]>([]); // S3 file objects
   const [totalFiles, setTotalFiles] = useState(0);
@@ -49,8 +123,20 @@ export default function FilesPage() {
   const loadFiles = async () => {
     setLoading(true);
     try {
-      const apiEndpoint = selectedProvider === 'azure-blob' ? '/api/azure' : 
-                         selectedProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
+      let apiEndpoint: string;
+      switch (selectedProvider) {
+        case 'azure-blob':
+          apiEndpoint = '/api/azure/azure-list';
+          break;
+        case 'gcp-storage':
+          apiEndpoint = '/api/gcp/gcp-list';
+          break;
+        case 'aws-s3':
+        default:
+          apiEndpoint = '/api/aws/aws-list';
+          break;
+      }
+      
       const res = await fetch(apiEndpoint);
       const data = await res.json();
       if (res.ok && data.files) {
@@ -77,54 +163,101 @@ export default function FilesPage() {
   // Paginate files in-memory
   const paginatedFiles = files.slice((currentPage - 1) * filesPerPage, currentPage * filesPerPage);
 
-  // Replace the old delete logic
+  // Delete file using presigned URL
   const handleDeleteFile = async (fileName: string) => {
     setDeletingFile(fileName);
     try {
-      const apiEndpoint = selectedProvider === 'azure-blob' ? '/api/azure' : 
-                         selectedProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
-      const res = await fetch(`${apiEndpoint}?key=${encodeURIComponent(fileName)}`, {
+      // Determine API endpoint based on selected provider
+      let apiEndpoint: string;
+      switch (selectedProvider) {
+        case 'gcp-storage':
+          apiEndpoint = '/api/gcp/gcp-delete';
+          break;
+        case 'azure-blob':
+          apiEndpoint = '/api/azure/azure-delete';
+          break;
+        case 'aws-s3':
+        default:
+          apiEndpoint = '/api/aws/aws-delete';
+          break;
+      }
+
+      // Step 1: Get presigned delete URL from backend
+      const presignedUrlResponse = await fetch(apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fileName }),
+      });
+
+      if (!presignedUrlResponse.ok) {
+        const errorData = await presignedUrlResponse.json();
+        throw new Error(errorData.error || 'Failed to get delete URL');
+      }
+
+      const { presignedUrl } = await presignedUrlResponse.json();
+
+      // Step 2: Delete directly from cloud storage using presigned URL
+      const deleteResponse = await fetch(presignedUrl, {
         method: 'DELETE',
       });
-      const data = await res.json();
-      if (res.ok) {
-        toast.success(`"${fileName}" deleted successfully`);
-        loadFiles(); // Refresh the list after deletion
-      } else {
-        toast.error(data.error || 'Failed to delete file');
+
+      if (!deleteResponse.ok) {
+        throw new Error(`Failed to delete file from ${selectedProvider}`);
       }
+
+      toast.success(`"${fileName}" deleted successfully`);
+      loadFiles(); // Refresh the list after deletion
     } catch (error) {
-      toast.error('Error deleting file');
+      toast.error(error instanceof Error ? error.message : 'Error deleting file');
     } finally {
       setDeletingFile(null);
     }
   };
 
-  // Add a new view/download handler
+  // View/download file using presigned URL
   const handleViewFile = async (fileName: string) => {
     try {
-      const apiEndpoint = selectedProvider === 'azure-blob' ? '/api/azure' : 
-                         selectedProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
-      const res = await fetch(`${apiEndpoint}?key=${encodeURIComponent(fileName)}`);
-      if (!res.ok) {
-        toast.error('Failed to fetch file');
-        return;
+      // Determine API endpoint based on selected provider
+      let apiEndpoint: string;
+      switch (selectedProvider) {
+        case 'gcp-storage':
+          apiEndpoint = '/api/gcp/gcp-get';
+          break;
+        case 'azure-blob':
+          apiEndpoint = '/api/azure/azure-get';
+          break;
+        case 'aws-s3':
+        default:
+          apiEndpoint = '/api/aws/aws-get';
+          break;
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+      // Step 1: Get presigned download URL from backend
+      const presignedUrlResponse = await fetch(apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fileName }),
+      });
+
+      if (!presignedUrlResponse.ok) {
+        const errorData = await presignedUrlResponse.json();
+        throw new Error(errorData.error || 'Failed to get download URL');
+      }
+
+      const { presignedUrl } = await presignedUrlResponse.json();
+
+      // Step 2: Open the presigned URL in a new tab
+      window.open(presignedUrl, '_blank');
     } catch (error) {
-      toast.error('Error fetching file');
+      toast.error(error instanceof Error ? error.message : 'Error fetching file');
     }
   };
 
-  // Add helper functions for image preview
-  const getPreviewUrl = (fileName: string) => {
-    const apiEndpoint = selectedProvider === 'azure-blob' ? '/api/azure' : 
-                       selectedProvider === 'gcp-storage' ? '/api/gcp' : '/api/aws';
-    return `${apiEndpoint}?key=${encodeURIComponent(fileName)}`;
-  };
+
 
   const isImageFile = (fileName: string) => {
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
@@ -316,20 +449,12 @@ export default function FilesPage() {
                       {/* Image Preview */}
                       <div className="aspect-square bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
                         {isImageFile(file.name) ? (
-                          <img
-                            src={getPreviewUrl(file.name)}
-                            alt={file.name}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              // Fallback to icon if image fails to load
-                              e.currentTarget.style.display = 'none';
-                              e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                            }}
-                          />
-                        ) : null}
-                        <div className={`w-full h-full flex items-center justify-center ${isImageFile(file.name) ? 'hidden' : ''}`}>
-                          <ImageIcon className="h-12 w-12 text-slate-400" />
-                        </div>
+                          <ImagePreview fileName={file.name} provider={selectedProvider} />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <ImageIcon className="h-12 w-12 text-slate-400" />
+                          </div>
+                        )}
 
                         {/* Delete button overlay */}
                         <Button
